@@ -11,17 +11,18 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
+use futures::executor::block_on;
 
 fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_title("Fucking MacOS")
+        .with_title("Application")
         .build(&event_loop)
         .unwrap();
 
     let size = window.inner_size();
 
-    let mut gfx = GraphicsState::new(&window, size.width, size.height).unwrap();
+    let mut gfx = block_on(GraphicsState::new(&window, size.width, size.height)).unwrap();
 
     let texture = load_texture("my_texture.png", &mut gfx).unwrap();
 
@@ -58,3 +59,4 @@ fn load_texture(path: &str, gfx: &mut GraphicsState) -> Result<TextureHandle, St
 2. Texture rotation
 3. Culling
 4. Stencils
+5. Reallocate buffers once max instance count is reached (current behaviour is panicking).

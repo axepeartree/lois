@@ -1,7 +1,6 @@
-mod pipeline;
 mod commons;
+mod pipeline;
 
-use futures::executor::block_on;
 use pipeline::Pipeline2D;
 
 pub use commons::{Color, Rect};
@@ -26,7 +25,11 @@ pub struct ViewportSize {
 }
 
 impl GraphicsState {
-    pub fn new(window: &impl HasRawWindowHandle, width: u32, height: u32) -> Result<Self, String> {
+    pub async fn new(
+        window: &impl HasRawWindowHandle,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, String> {
         let instance = wgpu::Instance::new(wgpu::BackendBit::METAL);
 
         let surface = unsafe { instance.create_surface(window) };
@@ -34,21 +37,25 @@ impl GraphicsState {
         let size = ViewportSize { width, height };
 
         let (device, queue) = {
-            let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                compatible_surface: Some(&surface),
-                power_preference: wgpu::PowerPreference::HighPerformance,
-            }))
-            .unwrap();
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    compatible_surface: Some(&surface),
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                })
+                .await
+                .unwrap();
 
-            block_on(adapter.request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("Device"),
-                    features: wgpu::Features::empty(),
-                    limits: Default::default(),
-                },
-                None,
-            ))
-            .unwrap()
+            adapter
+                .request_device(
+                    &wgpu::DeviceDescriptor {
+                        label: Some("Device"),
+                        features: wgpu::Features::empty(),
+                        limits: Default::default(),
+                    },
+                    None,
+                )
+                .await
+                .unwrap()
         };
 
         let swap_chain = create_swap_chain(&device, &surface, size.width, size.height);
@@ -74,11 +81,13 @@ impl GraphicsState {
             self.viewport_size.width,
             self.viewport_size.height,
         );
-        self.pipeline.update_uniforms(&self.queue, self.viewport_size);
+        self.pipeline
+            .update_uniforms(&self.queue, self.viewport_size);
     }
 
     pub fn load_texture(&mut self, descriptor: TextureDescriptor) -> Result<TextureHandle, String> {
-        self.pipeline.load_texture(&self.device, &self.queue, descriptor)
+        self.pipeline
+            .load_texture(&self.device, &self.queue, descriptor)
     }
 
     pub fn clear(&mut self, color: Color) {
@@ -88,11 +97,9 @@ impl GraphicsState {
     pub fn draw_texture(
         &mut self,
         texture: TextureHandle,
-        src_rect: impl Into<Option<Rect>>,
-        dest_rect: impl Into<Option<Rect>>,
+        src_rect: Option<Rect>,
+        dest_rect: Option<Rect>,
     ) -> Result<(), String> {
-        let src_rect = src_rect.into();
-        let dest_rect = dest_rect.into();
         self.pipeline
             .draw_texture(texture, src_rect, dest_rect, self.viewport_size)
     }
@@ -111,7 +118,6 @@ impl GraphicsState {
             .render(&self.device, &self.queue, &current_frame)
     }
 }
-
 
 fn create_swap_chain(
     device: &wgpu::Device,

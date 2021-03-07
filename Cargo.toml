@@ -8,7 +8,6 @@ edition = "2018"
 
 [dependencies]
 wgpu = "0.7.0"
-futures = "0.3.13"
 raw-window-handle = "0.3.3"
 
 [build-dependencies]
