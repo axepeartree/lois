@@ -37,7 +37,7 @@ fn main() {
             width: img.width(),
             height: img.height(),
             data: &img,
-        })
+        }).unwrap()
     };
 
     event_loop.run(move |event, _, control_flow| match event {
