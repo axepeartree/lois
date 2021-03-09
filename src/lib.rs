@@ -101,7 +101,7 @@ impl GraphicsState {
         dest_rect: Option<Rect>,
     ) -> Result<(), String> {
         self.pipeline
-            .draw_texture(texture, src_rect, dest_rect, self.viewport_size)
+            .draw_texture(&self.device, texture, src_rect, dest_rect, self.viewport_size)
     }
 
     pub fn render(&mut self) -> Result<(), String> {

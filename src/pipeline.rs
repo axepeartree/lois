@@ -8,8 +8,6 @@ use crate::ViewportSize;
 
 use super::{commons::AsBytes, Color, Rect};
 
-const MAX_INSTANCE_CAPACITY: usize = 10000;
-
 pub struct Pipeline2D {
     render_pipeline: wgpu::RenderPipeline,
 
@@ -23,7 +21,6 @@ pub struct Pipeline2D {
 
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
-    instance_buffer: wgpu::Buffer,
 
     cmd_queue: VecDeque<RenderCommand>,
     instances: Instances,
@@ -49,8 +46,9 @@ struct Texture {
 
 #[repr(C)]
 struct Instances {
-    value: [Instance; MAX_INSTANCE_CAPACITY],
-    next: u32,
+    buffer: wgpu::Buffer,
+    value: Vec<Instance>,
+    next: usize,
 }
 
 #[repr(C)]
@@ -223,19 +221,7 @@ impl Pipeline2D {
             contents: QUAD_INDICES.as_bytes(),
         });
 
-        let instances = Instances {
-            value: [Default::default(); MAX_INSTANCE_CAPACITY],
-            next: 0,
-        };
-
-        let instance_buffer = {
-            let instances_slice = &instances.value[..];
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Instance Buffer"),
-                usage: wgpu::BufferUsage::COPY_DST | wgpu::BufferUsage::VERTEX,
-                contents: instances_slice.as_bytes(),
-            })
-        };
+        let instances = Instances::new(&device);
 
         Self {
             render_pipeline,
@@ -249,7 +235,6 @@ impl Pipeline2D {
             instances,
             vertex_buffer,
             index_buffer,
-            instance_buffer,
         }
     }
 
@@ -282,6 +267,7 @@ impl Pipeline2D {
 
     pub fn draw_texture(
         &mut self,
+        device: &wgpu::Device,
         texture_handle: TextureHandle,
         src_rect: Option<Rect>,
         dest_rect: Option<Rect>,
@@ -292,27 +278,24 @@ impl Pipeline2D {
             .get(&texture_handle)
             .ok_or(String::from("Texture not found."))?;
 
+        // src rect must be normalized (values between 0.0 and 1.0) before using it in the shader.
         let src_rect = src_rect
-            .and_then(|src_rect| {
-                let width = texture.width() as f32;
-                let height = texture.height() as f32;
-                let x = src_rect.x as f32 / width;
-                let y = src_rect.y as f32 / height;
-                let w = src_rect.w as f32 / width;
-                let h = src_rect.h as f32 / height;
-                Some([x, y, w, h])
-            })
+            .and_then(|r| Some(r.normalized(texture.width() as f32, texture.height() as f32)))
             .unwrap_or([0.0, 0.0, 1.0, 1.0]);
 
-        let dest_rect = dest_rect.unwrap_or(Rect {
-            x: 0,
-            y: 0,
-            w: viewport_size.width,
-            h: viewport_size.height,
-        });
+        // dest rect does not need to be normalized! should be proportional to the view.
+        let dest_rect = dest_rect
+            .unwrap_or(Rect {
+                x: 0,
+                y: 0,
+                w: viewport_size.width,
+                h: viewport_size.height,
+            })
+            .into();
 
-        let instance = Instance::new(src_rect, dest_rect.into(), 1.0);
+        let instance = Instance::new(src_rect, dest_rect, 1.0);
 
+        // if there's already a draw command for this texture at the back of the queue, use it.
         if let Some(cmd) = self.cmd_queue.back_mut() {
             match cmd {
                 RenderCommand::DrawTexture {
@@ -320,7 +303,7 @@ impl Pipeline2D {
                     instances,
                 } => {
                     if texture_handle == *c_texture_handle {
-                        self.instances.push(instance);
+                        self.instances.push(device, instance);
                         instances.end += 1;
                         return Ok(());
                     }
@@ -329,11 +312,12 @@ impl Pipeline2D {
             }
         }
 
+        // create a new command if needed.
         self.cmd_queue.push_back(RenderCommand::DrawTexture {
-            instances: self.instances.next..self.instances.next + 1,
+            instances: self.instances.next as u32..(self.instances.next + 1) as u32,
             texture: texture_handle,
         });
-        self.instances.push(instance);
+        self.instances.push(device, instance);
 
         Ok(())
     }
@@ -350,8 +334,7 @@ impl Pipeline2D {
 
         let view = &current_frame.output.view;
 
-        let instances = &self.instances.value[..];
-        queue.write_buffer(&self.instance_buffer, 0, instances.as_bytes());
+        self.instances.update_buffer(queue);
 
         while let Some(cmd) = self.cmd_queue.pop_front() {
             match cmd {
@@ -387,7 +370,7 @@ impl Pipeline2D {
                     render_pass.set_bind_group(0, &texture.bind_group, &[]);
                     render_pass.set_bind_group(1, &self.uniforms_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, self.instances.buffer.slice(..));
                     render_pass
                         .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     render_pass.draw_indexed(0..QUAD_INDICES.len() as u32, 0, instances);
@@ -403,13 +386,57 @@ impl Pipeline2D {
 }
 
 impl Instances {
-    fn push(&mut self, instance: Instance) {
+    const ALLOC_CAPACITY: usize = 10000;
+
+    fn new(device: &wgpu::Device) -> Self {
+        let next = 0;
+        let value: Vec<Instance> = vec![Default::default(); Self::ALLOC_CAPACITY];
+        let buffer = {
+            let slice = &value[..];
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                usage: wgpu::BufferUsage::COPY_DST | wgpu::BufferUsage::VERTEX,
+                contents: slice.as_bytes(),
+            })
+        };
+
+        Self {
+            next: 0,
+            buffer,
+            value: vec![Default::default(); Self::ALLOC_CAPACITY],
+        }
+    }
+
+    fn push(&mut self, device: &wgpu::Device, instance: Instance) {
+        if self.next >= self.value.len() {
+            self.reserve_and_recreate_buffer(device);
+        }
         self.value[self.next as usize] = instance;
         self.next += 1;
     }
 
+    fn update_buffer(&mut self, queue: &wgpu::Queue) {
+        let slice = &self.value[..];
+        queue.write_buffer(&self.buffer, 0, slice.as_bytes());
+    }
+
     fn reset(&mut self) {
         self.next = 0;
+    }
+
+    fn reserve_and_recreate_buffer(&mut self, device: &wgpu::Device) {
+        self.value
+            .extend_from_slice(&[Default::default(); Self::ALLOC_CAPACITY]);
+        self.buffer = Self::create_instances_buffer(&self.value[..], device);
+    }
+
+    fn create_instances_buffer(instances: &[Instance], device: &wgpu::Device) -> wgpu::Buffer {
+        let slice = &instances[..];
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            usage: wgpu::BufferUsage::COPY_DST | wgpu::BufferUsage::VERTEX,
+            contents: slice.as_bytes(),
+        })
     }
 }
 
@@ -420,12 +447,6 @@ impl Texture {
         bind_group_layout: &wgpu::BindGroupLayout,
         descriptor: TextureDescriptor,
     ) -> Result<Self, String> {
-        // let img = image::io::Reader::open(path)
-        //     .unwrap()
-        //     .decode()
-        //     .unwrap()
-        //     .into_rgba8();
-
         let TextureDescriptor {
             name,
             data,
@@ -592,7 +613,7 @@ impl Uniforms {
 
         [
             [a, 0.0, 0.0, 0.0],
-            [0.0, b,0.0,  0.0],
+            [0.0, b, 0.0, 0.0],
             [0.0, 0.0, c, 0.0],
             [tx, ty, tz, 1.0],
         ]

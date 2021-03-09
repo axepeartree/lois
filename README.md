@@ -59,4 +59,3 @@ fn main() {
 2. Rotate texture
 3. CPU Culling
 4. Stencils
-5. Reallocate buffers once max instance count is reached (current behaviour is panicking).
