@@ -1,12 +1,10 @@
 mod commons;
 mod pipeline;
 
-use pipeline::Pipeline2D;
-
+pub use self::pipeline::{DrawTextureOptions, TextureDescriptor, TextureHandle};
 pub use commons::{Color, Rect};
+use pipeline::Pipeline2D;
 use raw_window_handle::HasRawWindowHandle;
-
-pub use self::pipeline::{TextureDescriptor, TextureHandle};
 
 pub struct GraphicsState {
     viewport_size: ViewportSize,
@@ -25,14 +23,16 @@ pub struct ViewportSize {
 }
 
 impl GraphicsState {
-    pub async fn new(
+    /// Creates an instance of the GraphicsState.
+    /// `window` must be a valid object.
+    pub async unsafe fn new(
         window: &impl HasRawWindowHandle,
         width: u32,
         height: u32,
     ) -> Result<Self, String> {
         let instance = wgpu::Instance::new(wgpu::BackendBit::METAL);
 
-        let surface = unsafe { instance.create_surface(window) };
+        let surface = instance.create_surface(window);
 
         let size = ViewportSize { width, height };
 
@@ -43,7 +43,7 @@ impl GraphicsState {
                     power_preference: wgpu::PowerPreference::HighPerformance,
                 })
                 .await
-                .unwrap();
+                .ok_or(String::from("Unable to request a suitable wgpu::Adapter."))?;
 
             adapter
                 .request_device(
@@ -55,7 +55,7 @@ impl GraphicsState {
                     None,
                 )
                 .await
-                .unwrap()
+                .map_err(|err| err.to_string())?
         };
 
         let swap_chain = create_swap_chain(&device, &surface, size.width, size.height);
@@ -97,11 +97,10 @@ impl GraphicsState {
     pub fn draw_texture(
         &mut self,
         texture: TextureHandle,
-        src_rect: Option<Rect>,
-        dest_rect: Option<Rect>,
+        options: DrawTextureOptions,
     ) -> Result<(), String> {
         self.pipeline
-            .draw_texture(&self.device, texture, src_rect, dest_rect, self.viewport_size)
+            .draw_texture(&self.device, texture, options, self.viewport_size)
     }
 
     pub fn render(&mut self) -> Result<(), String> {

@@ -9,6 +9,12 @@ pub struct Rect {
     pub h: u32,
 }
 
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Point {
+    pub x: i32,
+    pub y: i32,
+}
+
 pub trait AsBytes {
     fn as_bytes(&self) -> &[u8];
 }

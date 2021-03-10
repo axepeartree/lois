@@ -4,7 +4,7 @@ use std::{collections::HashMap, collections::VecDeque, ops::Range};
 
 use wgpu::util::DeviceExt;
 
-use crate::ViewportSize;
+use crate::{ViewportSize, commons::Point};
 
 use super::{commons::AsBytes, Color, Rect};
 
@@ -33,6 +33,15 @@ pub struct TextureDescriptor<'a> {
     pub data: &'a [u8],
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+pub struct DrawTextureOptions {
+    pub src_rect: Option<Rect>,
+    pub dest_rect: Option<Rect>,
+    pub center: Option<Point>,
+    pub angle: f32,
+    pub alpha: f32,
 }
 
 #[derive(Debug)]
@@ -269,14 +278,15 @@ impl Pipeline2D {
         &mut self,
         device: &wgpu::Device,
         texture_handle: TextureHandle,
-        src_rect: Option<Rect>,
-        dest_rect: Option<Rect>,
+        options: DrawTextureOptions,
         viewport_size: ViewportSize,
     ) -> Result<(), String> {
         let texture = self
             .textures
             .get(&texture_handle)
             .ok_or(String::from("Texture not found."))?;
+
+        let DrawTextureOptions { src_rect, dest_rect, center: _, angle: _, alpha: _ } = options;
 
         // src rect must be normalized (values between 0.0 and 1.0) before using it in the shader.
         let src_rect = src_rect
@@ -416,7 +426,7 @@ impl Instances {
     }
 
     fn update_buffer(&mut self, queue: &wgpu::Queue) {
-        let slice = &self.value[..];
+        let slice = &self.value[0..self.next];
         queue.write_buffer(&self.buffer, 0, slice.as_bytes());
     }
 

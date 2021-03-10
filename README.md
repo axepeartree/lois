@@ -22,7 +22,9 @@ fn main() {
 
     let size = window.inner_size();
 
-    let mut gfx = block_on(GraphicsState::new(&window, size.width, size.height)).unwrap();
+    let mut gfx = unsafe {
+        block_on(GraphicsState::new(&window, size.width, size.height)).unwrap()
+    };
 
     // load texture as &[u8] and  use the GraphicsState variable to load it into the GPU.
     let texture = {
@@ -44,7 +46,7 @@ fn main() {
         Event::RedrawRequested(_) => {}
         Event::MainEventsCleared => {
             gfx.clear(Color([100, 149, 237, 255]));
-            gfx.draw_texture(texture, None, None).unwrap();
+            gfx.draw_texture(texture, Default::default()).unwrap();
             // draw calls are only presented once render is called.
             gfx.render().unwrap();
         }
