@@ -1,5 +1,6 @@
 mod commons;
 mod pipeline;
+mod texture;
 
 pub use self::pipeline::{DrawTextureOptions, TextureDescriptor, TextureHandle};
 pub use commons::{Color, Rect};

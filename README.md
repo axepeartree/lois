@@ -59,5 +59,5 @@ fn main() {
 
 1. Render into texture
 2. Rotate texture
-3. CPU Culling
+3. CPU Culling - culling is pretty naive (only culls if rect is fully outside viewport)
 4. Stencils

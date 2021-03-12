@@ -1,12 +1,11 @@
 #![allow(dead_code, unused_variables, unused_mut)]
 
+use super::{commons::AsBytes, Color, Rect};
+use crate::{commons::Point, texture::Texture, ViewportSize};
 use std::{collections::HashMap, collections::VecDeque, ops::Range};
-
 use wgpu::util::DeviceExt;
 
-use crate::{ViewportSize, commons::Point};
-
-use super::{commons::AsBytes, Color, Rect};
+pub use crate::texture::TextureDescriptor;
 
 pub struct Pipeline2D {
     render_pipeline: wgpu::RenderPipeline,
@@ -28,13 +27,6 @@ pub struct Pipeline2D {
 
 pub type TextureHandle = u32;
 
-pub struct TextureDescriptor<'a> {
-    pub name: Option<&'a str>,
-    pub data: &'a [u8],
-    pub width: u32,
-    pub height: u32,
-}
-
 #[derive(Copy, Clone, Debug, Default)]
 pub struct DrawTextureOptions {
     pub src_rect: Option<Rect>,
@@ -42,15 +34,6 @@ pub struct DrawTextureOptions {
     pub center: Option<Point>,
     pub angle: f32,
     pub alpha: f32,
-}
-
-#[derive(Debug)]
-struct Texture {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    sampler: wgpu::Sampler,
-    bind_group: wgpu::BindGroup,
-    size: (u32, u32),
 }
 
 #[repr(C)]
@@ -281,27 +264,41 @@ impl Pipeline2D {
         options: DrawTextureOptions,
         viewport_size: ViewportSize,
     ) -> Result<(), String> {
+        let DrawTextureOptions {
+            src_rect,
+            dest_rect,
+            center: _,
+            angle: _,
+            alpha: _,
+        } = options;
+
+        // do some naive culling
+        // ignore this draw command if the quad is completely outside the viewport
+        let dest_rect = dest_rect.unwrap_or(Rect {
+            x: 0,
+            y: 0,
+            w: viewport_size.width,
+            h: viewport_size.height,
+        });
+
+        // ignore this draw command if the quad is completely outside the viewport
+        if !dest_rect.intersects(Rect::new(0, 0, viewport_size.width, viewport_size.height)) {
+            return Ok(());
+        }
+
+        let dest_rect = dest_rect.into();
+
         let texture = self
             .textures
             .get(&texture_handle)
             .ok_or(String::from("Texture not found."))?;
-
-        let DrawTextureOptions { src_rect, dest_rect, center: _, angle: _, alpha: _ } = options;
 
         // src rect must be normalized (values between 0.0 and 1.0) before using it in the shader.
         let src_rect = src_rect
             .and_then(|r| Some(r.normalized(texture.width() as f32, texture.height() as f32)))
             .unwrap_or([0.0, 0.0, 1.0, 1.0]);
 
-        // dest rect does not need to be normalized! should be proportional to the view.
-        let dest_rect = dest_rect
-            .unwrap_or(Rect {
-                x: 0,
-                y: 0,
-                w: viewport_size.width,
-                h: viewport_size.height,
-            })
-            .into();
+        // TODO: cut the quad if only part of it is inside the viewport.
 
         let instance = Instance::new(src_rect, dest_rect, 1.0);
 
@@ -450,100 +447,6 @@ impl Instances {
     }
 }
 
-impl Texture {
-    pub fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        bind_group_layout: &wgpu::BindGroupLayout,
-        descriptor: TextureDescriptor,
-    ) -> Result<Self, String> {
-        let TextureDescriptor {
-            name,
-            data,
-            width,
-            height,
-        } = descriptor;
-
-        let texture_size = wgpu::Extent3d {
-            width,
-            height,
-            depth: 1,
-        };
-
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: name,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
-            mip_level_count: 1,
-            sample_count: 1,
-            size: texture_size,
-        });
-
-        let view = texture.create_view(&Default::default());
-
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-
-        queue.write_texture(
-            wgpu::TextureCopyView {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-            },
-            data,
-            wgpu::TextureDataLayout {
-                offset: 0,
-                bytes_per_row: 4 * width,
-                rows_per_image: height,
-            },
-            texture_size,
-        );
-
-        let name = format!("{} Bind Group", name.unwrap_or("Untitled"));
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(name.as_str()),
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
-
-        Ok(Self {
-            texture,
-            view,
-            sampler,
-            bind_group,
-            size: (width, height),
-        })
-    }
-
-    #[inline(always)]
-    fn width(&self) -> u32 {
-        self.size.0
-    }
-
-    #[inline(always)]
-    fn height(&self) -> u32 {
-        self.size.1
-    }
-}
-
 impl Vertex {
     fn buffer_desc<'a>() -> wgpu::VertexBufferLayout<'a> {
         wgpu::VertexBufferLayout {
@@ -626,6 +529,23 @@ impl Uniforms {
             [0.0, b, 0.0, 0.0],
             [0.0, 0.0, c, 0.0],
             [tx, ty, tz, 1.0],
+        ]
+    }
+
+    #[inline(always)]
+    fn rotation_around(point: Point, angle: f32) -> [[f32; 4]; 4] {
+        let cos = angle.cos();
+        let sin = angle.sin();
+        [
+            [-cos, sin, 0.0, 0.0],
+            [-sin, cos, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [
+                -cos * point.x + point.x + sin * point.y,
+                -sin * point.x - cos * point.y + point.y,
+                0.0,
+                0.0,
+            ],
         ]
     }
 }
