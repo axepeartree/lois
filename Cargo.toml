@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 wgpu = "0.7.0"
 raw-window-handle = "0.3.3"
+glam = "0.13.0"
 
 [build-dependencies]
 shaderc = "0.7"

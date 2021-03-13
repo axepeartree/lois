@@ -1,6 +1,9 @@
 #![allow(dead_code, unused_variables, unused_mut)]
 
-use super::{commons::AsBytes, Color, Rect};
+use super::{
+    commons::{mat4, AsBytes},
+    Color, Rect,
+};
 use crate::{commons::Point, texture::Texture, ViewportSize};
 use std::{collections::HashMap, collections::VecDeque, ops::Range};
 use wgpu::util::DeviceExt;
@@ -27,7 +30,7 @@ pub struct Pipeline2D {
 
 pub type TextureHandle = u32;
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug)]
 pub struct DrawTextureOptions {
     pub src_rect: Option<Rect>,
     pub dest_rect: Option<Rect>,
@@ -45,15 +48,13 @@ struct Instances {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
-struct Vertex {
-    position: [f32; 2],
-}
+struct Vertex(f32, f32);
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
 struct Instance {
+    transform: [[f32; 4]; 4],
     src_rect: [f32; 4],
-    dest_rect: [f32; 4],
     alpha: f32,
 }
 
@@ -75,18 +76,10 @@ enum RenderCommand {
 }
 
 const QUAD_VERTICES: &[Vertex] = &[
-    Vertex {
-        position: [0.0, 0.0],
-    },
-    Vertex {
-        position: [1.0, 0.0],
-    },
-    Vertex {
-        position: [1.0, 1.0],
-    },
-    Vertex {
-        position: [0.0, 1.0],
-    },
+    Vertex(0.0, 0.0),
+    Vertex(1.0, 0.0),
+    Vertex(1.0, 1.0),
+    Vertex(0.0, 1.0),
 ];
 
 const QUAD_INDICES: &[u16] = &[0, 1, 2, 0, 2, 3];
@@ -173,8 +166,16 @@ impl Pipeline2D {
                     )),
                     entry_point: "main",
                     targets: &[wgpu::ColorTargetState {
-                        alpha_blend: wgpu::BlendState::REPLACE,
-                        color_blend: wgpu::BlendState::REPLACE,
+                        color_blend: wgpu::BlendState {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha_blend: wgpu::BlendState {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
                         format: wgpu::TextureFormat::Bgra8UnormSrgb,
                         write_mask: wgpu::ColorWrite::ALL,
                     }],
@@ -267,26 +268,13 @@ impl Pipeline2D {
         let DrawTextureOptions {
             src_rect,
             dest_rect,
-            center: _,
-            angle: _,
-            alpha: _,
+            center,
+            angle,
+            alpha,
         } = options;
 
-        // do some naive culling
-        // ignore this draw command if the quad is completely outside the viewport
-        let dest_rect = dest_rect.unwrap_or(Rect {
-            x: 0,
-            y: 0,
-            w: viewport_size.width,
-            h: viewport_size.height,
-        });
-
-        // ignore this draw command if the quad is completely outside the viewport
-        if !dest_rect.intersects(Rect::new(0, 0, viewport_size.width, viewport_size.height)) {
-            return Ok(());
-        }
-
-        let dest_rect = dest_rect.into();
+        let dest_rect =
+            dest_rect.unwrap_or(Rect::new(0, 0, viewport_size.width, viewport_size.height));
 
         let texture = self
             .textures
@@ -298,9 +286,17 @@ impl Pipeline2D {
             .and_then(|r| Some(r.normalized(texture.width() as f32, texture.height() as f32)))
             .unwrap_or([0.0, 0.0, 1.0, 1.0]);
 
-        // TODO: cut the quad if only part of it is inside the viewport.
+        // if no center is provided, use dest_rect center
+        let center = center.unwrap_or(Point::new(
+            dest_rect.x as f32 + dest_rect.w as f32 / 2.0,
+            dest_rect.y as f32 + dest_rect.h as f32 / 2.0,
+        ));
 
-        let instance = Instance::new(src_rect, dest_rect, 1.0);
+        let instance = Instance::new(src_rect, dest_rect.into(), center.into(), angle, alpha);
+
+        if !instance.is_inside_viewport(viewport_size.width, viewport_size.height) {
+            return Ok(())
+        }
 
         // if there's already a draw command for this texture at the back of the queue, use it.
         if let Some(cmd) = self.cmd_queue.back_mut() {
@@ -329,7 +325,7 @@ impl Pipeline2D {
         Ok(())
     }
 
-    pub fn render(
+    pub fn present(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -462,12 +458,41 @@ impl Vertex {
 }
 
 impl Instance {
-    fn new(src_rect: [f32; 4], dest_rect: [f32; 4], alpha: f32) -> Self {
+    fn new(
+        src_rect: [f32; 4],
+        dest_rect: [f32; 4],
+        center: [f32; 2],
+        angle: f32,
+        alpha: f32,
+    ) -> Self {
+        use glam::*;
+        let position = Mat4::from_translation(Vec3::new(dest_rect[0], dest_rect[1], 0.0));
+        let scale = Mat4::from_scale(Vec3::new(dest_rect[2], dest_rect[3], 0.0));
+        let rotation = Mat4::from_translation(Vec3::new(center[0], center[1], 0.0))
+            * Mat4::from_rotation_z(angle)
+            * Mat4::from_translation(Vec3::new(-center[0], -center[1], 0.0));
+        let transform = position * rotation * scale;
+
         Self {
-            src_rect,
-            dest_rect,
+            transform: transform.to_cols_array_2d(),
+            src_rect: src_rect.into(),
             alpha,
         }
+    }
+
+    fn is_inside_viewport(&self, viewport_width: u32, viewport_height: u32) -> bool {
+        use glam::*;
+        let vw = viewport_width as f32;
+        let vh = viewport_height as  f32;
+
+        // ugly stuff to avoid collecting and allocating
+        let mut vertices = [Vec4::ZERO; 4];
+        for (i, vertex) in QUAD_VERTICES.iter().enumerate() {
+            let position = Vec4::new(vertex.0, vertex.1, 0.0, 1.0);
+            vertices[i] = Mat4::from_cols_array_2d(&self.transform) * position;
+        }
+
+        false
     }
 
     fn buffer_desc<'a>() -> wgpu::VertexBufferLayout<'a> {
@@ -475,6 +500,7 @@ impl Instance {
             array_stride: core::mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::InputStepMode::Instance,
             attributes: &[
+                // transform
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 1,
@@ -486,8 +512,25 @@ impl Instance {
                     format: wgpu::VertexFormat::Float4,
                 },
                 wgpu::VertexAttribute {
-                    offset: core::mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+                    offset: 2 * core::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
                     shader_location: 3,
+                    format: wgpu::VertexFormat::Float4,
+                },
+                wgpu::VertexAttribute {
+                    offset: 3 * core::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                    shader_location: 4,
+                    format: wgpu::VertexFormat::Float4,
+                },
+                // src_rect
+                wgpu::VertexAttribute {
+                    offset: 4 * core::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float4,
+                },
+                // alpha
+                wgpu::VertexAttribute {
+                    offset: 5 * core::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                    shader_location: 6,
                     format: wgpu::VertexFormat::Float,
                 },
             ],
@@ -504,49 +547,14 @@ impl Uniforms {
         let near = 1.0;
         let far = -1.0;
         Self {
-            view: Self::orthographic_rh(left, right, bottom, top, near, far),
+            view: mat4::orthographic_rh(left, right, bottom, top, near, far),
         }
     }
+}
 
-    #[inline(always)]
-    fn orthographic_rh(
-        left: f32,
-        right: f32,
-        bottom: f32,
-        top: f32,
-        near: f32,
-        far: f32,
-    ) -> [[f32; 4]; 4] {
-        let a = 2.0 / (right - left);
-        let b = 2.0 / (top - bottom);
-        let c = -2.0 / (far - near);
-        let tx = -(right + left) / (right - left);
-        let ty = -(top + bottom) / (top - bottom);
-        let tz = -(far + near) / (far - near);
-
-        [
-            [a, 0.0, 0.0, 0.0],
-            [0.0, b, 0.0, 0.0],
-            [0.0, 0.0, c, 0.0],
-            [tx, ty, tz, 1.0],
-        ]
-    }
-
-    #[inline(always)]
-    fn rotation_around(point: Point, angle: f32) -> [[f32; 4]; 4] {
-        let cos = angle.cos();
-        let sin = angle.sin();
-        [
-            [-cos, sin, 0.0, 0.0],
-            [-sin, cos, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [
-                -cos * point.x + point.x + sin * point.y,
-                -sin * point.x - cos * point.y + point.y,
-                0.0,
-                0.0,
-            ],
-        ]
+impl Into<[f32; 2]> for Vertex {
+    fn into(self) -> [f32; 2] {
+        [self.0, self.1]
     }
 }
 
@@ -578,3 +586,16 @@ impl AsBytes for &[Instance] {
         unsafe { core::slice::from_raw_parts(self.as_ptr() as *const u8, size) }
     }
 }
+
+impl Default for DrawTextureOptions {
+    fn default() -> Self {
+        Self {
+            src_rect: None,
+            dest_rect: None,
+            center: None,
+            angle: 0.0,
+            alpha: 1.0,
+        }
+    }
+}
+

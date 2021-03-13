@@ -333,6 +333,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27e6eecbd94ac86b2e1f3b0065ed5f17c097c15d668dddb84208a141e271403b"
+
+[[package]]
 name = "glow"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -491,6 +497,7 @@ dependencies = [
 name = "lois"
 version = "0.1.0"
 dependencies = [
+ "glam",
  "raw-window-handle",
  "shaderc",
  "wgpu",

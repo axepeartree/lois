@@ -3,7 +3,7 @@ mod pipeline;
 mod texture;
 
 pub use self::pipeline::{DrawTextureOptions, TextureDescriptor, TextureHandle};
-pub use commons::{Color, Rect};
+pub use commons::{Color, Point, Rect};
 use pipeline::Pipeline2D;
 use raw_window_handle::HasRawWindowHandle;
 
@@ -31,7 +31,7 @@ impl GraphicsState {
         width: u32,
         height: u32,
     ) -> Result<Self, String> {
-        let instance = wgpu::Instance::new(wgpu::BackendBit::METAL);
+        let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
 
         let surface = instance.create_surface(window);
 
@@ -104,7 +104,7 @@ impl GraphicsState {
             .draw_texture(&self.device, texture, options, self.viewport_size)
     }
 
-    pub fn render(&mut self) -> Result<(), String> {
+    pub fn present(&mut self) -> Result<(), String> {
         let current_frame = match self.swap_chain.get_current_frame() {
             Ok(current_frame) => current_frame,
             Err(wgpu::SwapChainError::OutOfMemory) => {
@@ -115,7 +115,7 @@ impl GraphicsState {
         };
 
         self.pipeline
-            .render(&self.device, &self.queue, &current_frame)
+            .present(&self.device, &self.queue, &current_frame)
     }
 }
 

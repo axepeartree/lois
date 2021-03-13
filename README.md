@@ -57,7 +57,8 @@ fn main() {
 
 ## TODOs
 
-1. Render into texture
-2. Rotate texture
-3. CPU Culling - culling is pretty naive (only culls if rect is fully outside viewport)
-4. Stencils
+1. Rotate texture
+2. Better CPU Culling - culling is pretty naive (only culls if rect is fully outside viewport)
+3. Stencils
+4. Texture rotation
+5. API improvements

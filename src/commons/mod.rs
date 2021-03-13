@@ -1,3 +1,5 @@
+pub mod mat4;
+
 #[derive(Copy, Clone, Debug)]
 pub struct Color(pub [u8; 4]);
 
@@ -17,6 +19,12 @@ pub struct Point {
 
 pub trait AsBytes {
     fn as_bytes(&self) -> &[u8];
+}
+
+impl Point {
+    pub fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
 }
 
 impl Rect {
@@ -68,5 +76,11 @@ impl Into<[f32; 4]> for Rect {
     #[inline(always)]
     fn into(self) -> [f32; 4] {
         [self.x as f32, self.y as f32, self.w as f32, self.h as f32]
+    }
+}
+
+impl Into<[f32; 2]> for Point {
+    fn into(self) -> [f32; 2] {
+        [self.x, self.y]
     }
 }
