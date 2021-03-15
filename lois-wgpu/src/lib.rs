@@ -3,9 +3,7 @@ use std::collections::HashMap;
 use raw_window_handle::HasRawWindowHandle;
 use wgpu::util::DeviceExt;
 
-use crate::{commons::{Color, ViewportSize}, graphics::DrawCommand, quad::Quad, texture::{Texture, TextureFormat, TextureLoadOptions, TextureQuery, TextureUsage}};
-
-use super::Backend;
+use lois::{backend::Backend, commons::{Color, ViewportSize}, graphics::DrawCommand, quad::Quad, texture::{Texture, TextureFormat, TextureLoadOptions, TextureQuery, TextureUsage}};
 
 pub struct BackendWgpu {
     viewport_size: ViewportSize,
@@ -83,7 +81,7 @@ impl Backend for BackendWgpu {
         } else {
             self.instance_buffer = Some(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
-                usage: wgpu::BufferUsage::VERTEX,
+                usage: wgpu::BufferUsage::VERTEX | wgpu::BufferUsage::COPY_DST,
                 contents: quads.as_bytes(),
             }));
         }
@@ -96,7 +94,7 @@ impl Backend for BackendWgpu {
                     if command.target.is_some() {
                         panic!("Render targets not yet supported.")
                     }
-                    let texture = self.textures.get(&command.texture.0).expect("Texture not found while presenting.");
+                    let texture = self.textures.get(&command.texture.id()).expect("Texture not found while presenting.");
                     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("Texture render pass"),
                         depth_stencil_attachment: None,
@@ -127,7 +125,7 @@ impl Backend for BackendWgpu {
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 store: true,
-                                load: wgpu::LoadOp::Clear(command.color.into()),
+                                load: wgpu::LoadOp::Clear(color_to_wgpu_color(command.color)),
                             },
                         }],
                     });
@@ -145,18 +143,18 @@ impl Backend for BackendWgpu {
         let texture = self.next_texture;
         self.next_texture += 1;
         self.textures.insert(texture, texture_resource);
-        Ok(Texture(texture))
+        Ok(Texture::new(texture))
     }
 
     fn unload_texture(&mut self, texture: Texture) {
-        self.textures.remove(&texture.0);
+        self.textures.remove(&texture.id());
     }
 
     fn query_texture(
         &self,
         texture: Texture,
     ) -> Option<TextureQuery> {
-        let texture = self.textures.get(&texture.0)?;
+        let texture = self.textures.get(&texture.id())?;
         Some(TextureQuery {
             name: texture.name.as_ref().map(|s| s.as_str()),
             format: texture.format,
@@ -181,7 +179,7 @@ impl Backend for BackendWgpu {
         );
     }
 
-    fn viewport(&mut self) -> ViewportSize {
+    fn viewport(&self) -> ViewportSize {
         self.viewport_size
     }
 }
@@ -189,11 +187,8 @@ impl Backend for BackendWgpu {
 impl BackendWgpu {
     pub async unsafe fn new(
         window: &impl HasRawWindowHandle,
-        width: u32,
-        height: u32,
+        viewport_size: ViewportSize,
     ) -> Result<Self, String> {
-        let viewport_size = ViewportSize { width, height };
-
         let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
 
         let surface = instance.create_surface(window);
@@ -220,7 +215,7 @@ impl BackendWgpu {
                 .map_err(|err| err.to_string())?
         };
 
-        let swap_chain = create_swap_chain(&device, &surface, width, height);
+        let swap_chain = create_swap_chain(&device, &surface, viewport_size.width, viewport_size.height);
 
         let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Textures Bind Group Layout Descriptor"),
@@ -292,13 +287,13 @@ impl BackendWgpu {
                 vertex: wgpu::VertexState {
                     buffers: &[Vertex::buffer_desc(), quads_buffer_desc()],
                     module: &device.create_shader_module(&wgpu::include_spirv!(
-                        "./shaders/out/shader.vert.spv"
+                        "../shaders/out/shader.vert.spv"
                     )),
                     entry_point: "main",
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &device.create_shader_module(&wgpu::include_spirv!(
-                        "./shaders/out/shader.frag.spv"
+                        "../shaders/out/shader.frag.spv"
                     )),
                     entry_point: "main",
                     targets: &[wgpu::ColorTargetState {
@@ -562,14 +557,12 @@ fn quads_buffer_desc<'a>() -> wgpu::VertexBufferLayout<'a> {
     }
 }
 
-impl Into<wgpu::Color> for Color {
-    fn into(self) -> wgpu::Color {
-        wgpu::Color {
-            r: self.r as f64 / u8::MAX as f64,
-            g: self.g as f64 / u8::MAX as f64,
-            b: self.b as f64 / u8::MAX as f64,
-            a: self.a as f64 / u8::MAX as f64,
-        }
+fn color_to_wgpu_color(color: Color) -> wgpu::Color {
+    wgpu::Color {
+        r: color.r as f64 / u8::MAX as f64,
+        g: color.g as f64 / u8::MAX as f64,
+        b: color.b as f64 / u8::MAX as f64,
+        a: color.a as f64 / u8::MAX as f64,
     }
 }
 

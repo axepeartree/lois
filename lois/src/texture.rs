@@ -1,5 +1,5 @@
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct Texture(pub(crate) u32);
+pub struct Texture(u32);
 
 #[derive(Copy, Clone, Debug)]
 pub struct TextureQuery<'a> {
@@ -29,6 +29,16 @@ pub enum TextureFormat {
 pub enum TextureUsage {
     Default,
     RenderTarget,
+}
+
+impl Texture {
+    pub fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub fn id(&self) -> u32 {
+        self.0
+    }
 }
 
 impl Default for TextureFormat {

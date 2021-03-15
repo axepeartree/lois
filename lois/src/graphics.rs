@@ -49,11 +49,8 @@ impl<B> Graphics<B>
 where
     B: Backend,
 {
-    pub fn new(backend: B) -> Self {
-        let viewport_size = ViewportSize {
-            width: 860,
-            height: 640,
-        };
+    pub fn new(mut backend: B) -> Self {
+        let viewport_size = backend.viewport();
         let commands = Vec::with_capacity(1000);
         let quads = QuadArrayVec::new();
         Self {
@@ -137,6 +134,7 @@ where
     }
 
     pub fn resize_viewport(&mut self, new_size: ViewportSize) {
+        self.viewport_size = new_size;
         self.backend.resize_viewport(new_size);
     }
 

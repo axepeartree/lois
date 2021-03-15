@@ -46,22 +46,12 @@ impl Rect {
         let h = self.h as f32 / height;
         [x, y, w, h]
     }
+}
 
-    pub(crate) fn intersects(&self, rhs: Rect) -> bool {
-        let right = self.x;
-        let left = self.x + self.w as i32;
-        let top = self.y;
-        let bottom = self.y + self.h as i32;
-
-        let rhs_right = rhs.x;
-        let rhs_left = rhs.x + rhs.w as i32;
-        let rhs_top = rhs.y;
-        let rhs_bottom = rhs.y + rhs.h as i32;
-
-        (right >= rhs_left && right <= rhs_right)
-            || (left >= rhs_left && left <= rhs_right)
-            || (top >= rhs_top && top <= rhs_bottom)
-            || (bottom >= rhs_top && bottom <= rhs_bottom)
+impl ViewportSize {
+    #[inline(always)]
+    pub fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
     }
 }
 

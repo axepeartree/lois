@@ -13,11 +13,9 @@ layout(location=2) in vec4 transform_col_2;
 layout(location=3) in vec4 transform_col_3;
 layout(location=4) in vec4 transform_col_4;
 layout(location=5) in vec4 src_rect;
-layout(location=6) in float alpha;
 
 // out
 layout(location=0) out vec2 tex_coords;
-layout(location=1) out float tex_alpha;
 
 void main() {
     mat4 transform = mat4(
@@ -26,7 +24,6 @@ void main() {
         transform_col_3,
         transform_col_4
     );
-    tex_alpha = alpha;
     tex_coords = v_position * src_rect.zw + src_rect.xy;
     gl_Position = view * transform * vec4(v_position, 0.0, 1.0);
 }

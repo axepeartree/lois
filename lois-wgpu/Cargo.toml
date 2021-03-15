@@ -1,5 +1,5 @@
 [package]
-name = "backend-wgpu"
+name = "lois-wgpu"
 version = "0.1.0"
 authors = ["axepeartree <joaoeduardo.smp@gmail.com>"]
 edition = "2018"
@@ -10,6 +10,7 @@ edition = "2018"
 wgpu = "0.7.0"
 raw-window-handle = "0.3.3"
 glam = "0.13.0"
+lois = { path = "../lois" }
 
 [build-dependencies]
 shaderc = "0.7"
