@@ -1,14 +1,13 @@
 #![allow(dead_code, unused_variables, unused_mut)]
 
-use super::{
-    commons::{mat4, AsBytes},
-    Color, Rect,
-};
-use crate::{commons::Point, texture::Texture, ViewportSize};
+mod texture;
+
 use std::{collections::HashMap, collections::VecDeque, ops::Range};
 use wgpu::util::DeviceExt;
+use crate::{commons::{Point, Color, Rect, AsBytes, mat4}, ViewportSize};
+use texture::Texture;
 
-pub use crate::texture::TextureDescriptor;
+pub use texture::TextureDescriptor;
 
 pub struct Pipeline2D {
     render_pipeline: wgpu::RenderPipeline,
@@ -156,13 +155,13 @@ impl Pipeline2D {
                 vertex: wgpu::VertexState {
                     buffers: &[Vertex::buffer_desc(), Instance::buffer_desc()],
                     module: &device.create_shader_module(&wgpu::include_spirv!(
-                        "../shaders/out/shader.vert.spv"
+                        "../../shaders/out/shader.vert.spv"
                     )),
                     entry_point: "main",
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &device.create_shader_module(&wgpu::include_spirv!(
-                        "../shaders/out/shader.frag.spv"
+                        "../../shaders/out/shader.frag.spv"
                     )),
                     entry_point: "main",
                     targets: &[wgpu::ColorTargetState {

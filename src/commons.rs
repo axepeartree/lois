@@ -1,7 +1,16 @@
-pub mod mat4;
+#[derive(Copy, Clone, Debug)]
+pub struct ViewportSize {
+    pub width: u32,
+    pub height: u32,
+}
 
 #[derive(Copy, Clone, Debug)]
-pub struct Color(pub [u8; 4]);
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Rect {
@@ -15,10 +24,6 @@ pub struct Rect {
 pub struct Point {
     pub x: f32,
     pub y: f32,
-}
-
-pub trait AsBytes {
-    fn as_bytes(&self) -> &[u8];
 }
 
 impl Point {
@@ -57,18 +62,6 @@ impl Rect {
             || (left >= rhs_left && left <= rhs_right)
             || (top >= rhs_top && top <= rhs_bottom)
             || (bottom >= rhs_top && bottom <= rhs_bottom)
-    }
-}
-
-impl Into<wgpu::Color> for Color {
-    #[inline(always)]
-    fn into(self) -> wgpu::Color {
-        wgpu::Color {
-            r: self.0[0] as f64 / 255.0,
-            g: self.0[1] as f64 / 255.0,
-            b: self.0[2] as f64 / 255.0,
-            a: self.0[3] as f64 / 255.0,
-        }
     }
 }
 

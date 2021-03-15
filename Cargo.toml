@@ -1,15 +1,18 @@
 [package]
 name = "lois"
-version = "0.1.0"
-authors = ["jesmpx <joao.eduardo@lar.app>"]
+version = "0.1.1"
+authors = ["axepeartree <joaoeduardo.smp@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
-wgpu = "0.7.0"
-raw-window-handle = "0.3.3"
-glam = "0.13.0"
+[features]
+default = ["wgpu", "raw-window-handle"]
 
-[build-dependencies]
-shaderc = "0.7"
+[dependencies]
+glam = "0.13.0"
+raw-window-handle = { version = "0.3.3", optional = true }
+wgpu = { version = "0.7.0", optional = true }
+
+[dev-dependencies]
+winit = "0.24.0"
