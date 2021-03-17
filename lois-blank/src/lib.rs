@@ -1,22 +1,21 @@
 use std::collections::HashMap;
 use lois::{
     backend::Backend,
-    commons::ViewportSize,
+    commons::ViewSize,
     graphics::DrawCommand,
     quad::Quad,
     texture::{Texture, TextureFormat, TextureLoadOptions, TextureQuery, TextureUsage},
 };
 
 pub struct BackendBlank {
-    viewport_size: ViewportSize,
+    viewport_size: ViewSize,
     textures: HashMap<u32, TextureBlank>,
     next_texture: Texture,
 }
 
 struct TextureBlank {
     name: Option<String>,
-    width: u32,
-    height: u32,
+    size: ViewSize,
     usage: TextureUsage,
     format: TextureFormat,
 }
@@ -24,7 +23,7 @@ struct TextureBlank {
 impl BackendBlank {
     pub fn new() -> Self {
         Self {
-            viewport_size: ViewportSize { width: 860, height: 640 },
+            viewport_size: ViewSize { width: 860, height: 640 },
             next_texture: Texture::new(0),
             textures: HashMap::with_capacity(100),
         }
@@ -40,8 +39,7 @@ impl Backend for BackendBlank {
             TextureBlank {
                 name: Some(options.name.unwrap_or("Untitled").to_string()),
                 format: options.format,
-                width: options.width,
-                height: options.height,
+                size: options.size,
                 usage: options.usage,
             },
         );
@@ -60,16 +58,15 @@ impl Backend for BackendBlank {
             name: texture.name.as_ref().map(|s| s.as_str()),
             format: texture.format,
             usage: texture.usage,
-            width: texture.width,
-            height: texture.height,
+            size: texture.size,
         })
     }
 
-    fn resize_viewport(&mut self, new_size: ViewportSize) {
+    fn resize_viewport(&mut self, new_size: ViewSize) {
         self.viewport_size = new_size;
     }
 
-    fn viewport(&self) -> ViewportSize {
+    fn viewport(&self) -> ViewSize {
         self.viewport_size
     }
 }

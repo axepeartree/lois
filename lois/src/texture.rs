@@ -1,11 +1,12 @@
+use crate::commons::ViewSize;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Texture(u32);
 
 #[derive(Copy, Clone, Debug)]
 pub struct TextureQuery<'a> {
     pub name: Option<&'a str>,
-    pub width: u32,
-    pub height: u32,
+    pub size: ViewSize,
     pub format: TextureFormat,
     pub usage: TextureUsage,
 }
@@ -14,8 +15,7 @@ pub struct TextureQuery<'a> {
 pub struct TextureLoadOptions<'a> {
     pub name: Option<&'a str>,
     pub data: Option<&'a [u8]>,
-    pub width: u32,
-    pub height: u32,
+    pub size: ViewSize,
     pub format: TextureFormat,
     pub usage: TextureUsage,
 }

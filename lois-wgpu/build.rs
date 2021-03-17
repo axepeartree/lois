@@ -1,6 +1,6 @@
 fn main() {
-    let mut compiler = shaderc::Compiler::new().expect("Unable to create shaderc compiler");
     println!("cargo:rerun-if-changed={}", "./shaders");
+    let mut compiler = shaderc::Compiler::new().expect("Unable to create shaderc compiler");
     let vs_spirv = compiler
         .compile_into_spirv(
             include_str!("./shaders/shader.vert"),

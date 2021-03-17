@@ -5,3 +5,6 @@ members = [
     "lois-blank",
     "lois-wgpu",
 ]
+
+[profile.release]
+debug = true

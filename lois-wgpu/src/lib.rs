@@ -1,12 +1,13 @@
+use winit::window::Window;
 use std::collections::HashMap;
 
 use raw_window_handle::HasRawWindowHandle;
 use wgpu::util::DeviceExt;
 
-use lois::{backend::Backend, commons::{Color, ViewportSize}, graphics::DrawCommand, quad::Quad, texture::{Texture, TextureFormat, TextureLoadOptions, TextureQuery, TextureUsage}};
+use lois::{backend::Backend, commons::{Color, ViewSize}, graphics::DrawCommand, quad::Quad, texture::{Texture, TextureFormat, TextureLoadOptions, TextureQuery, TextureUsage}};
 
 pub struct BackendWgpu {
-    viewport_size: ViewportSize,
+    viewport_size: ViewSize,
     _instance: wgpu::Instance,
     surface: wgpu::Surface,
     device: wgpu::Device,
@@ -26,16 +27,17 @@ pub struct BackendWgpu {
     index_buffer: wgpu::Buffer,
     vertex_buffer: wgpu::Buffer,
     instance_buffer: Option<wgpu::Buffer>,
+    instance_buffer_capacity: usize,
 }
 
 struct TextureWgpu {
     name: Option<String>,
-    size: (u32, u32),
+    size: ViewSize,
     format: TextureFormat,
     usage: TextureUsage,
 
     _texture: wgpu::Texture,
-    _view: wgpu::TextureView,
+    view: wgpu::TextureView,
     _sampler: wgpu::Sampler,
     bind_group: wgpu::BindGroup,
 }
@@ -72,18 +74,15 @@ impl Backend for BackendWgpu {
 
         let view = &current_frame.output.view;
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Command Encoder"),
-        });
-
-        if let Some(instance_buffer) = self.instance_buffer.as_mut() {
-            self.queue.write_buffer(instance_buffer, 0, quads.as_bytes());
-        } else {
+        if self.instance_buffer_capacity < quads.len() || self.instance_buffer.is_none() {
             self.instance_buffer = Some(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
                 usage: wgpu::BufferUsage::VERTEX | wgpu::BufferUsage::COPY_DST,
                 contents: quads.as_bytes(),
             }));
+            self.instance_buffer_capacity = quads.len();
+        } else if let Some(instance_buffer) = self.instance_buffer.as_ref() {
+            self.queue.write_buffer(instance_buffer, 0, quads.as_bytes());
         }
 
         let instance_buffer = self.instance_buffer.as_ref().unwrap();
@@ -91,37 +90,61 @@ impl Backend for BackendWgpu {
         for command in commands {
             match command {
                 DrawCommand::DrawTextureBatch(command) => {
-                    if command.target.is_some() {
-                        panic!("Render targets not yet supported.")
-                    }
-                    let texture = self.textures.get(&command.texture.id()).expect("Texture not found while presenting.");
-                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("Texture render pass"),
-                        depth_stencil_attachment: None,
-                        color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                            attachment: view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                store: true,
-                                load: wgpu::LoadOp::Load,
-                            },
-                        }],
+                    let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Command Encoder"),
                     });
-                    render_pass.set_pipeline(&self.render_pipeline);
-                    render_pass.set_bind_group(0, &texture.bind_group, &[]);
-                    render_pass.set_bind_group(1, &self.uniforms_bind_group, &[]);
-                    render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
-                    render_pass
-                        .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..QUAD_INDICES.len() as u32, 0, command.range.start as u32..command.range.end as u32);
+
+                    let texture = self.textures.get(&command.texture.id()).expect("Texture not found while presenting.");
+
+                    let (target, size) = if let Some(target) = command.target {
+                        let texture = self.textures.get(&target.id()).expect("Target not found while presenting.");
+                        (&texture.view, texture.size)
+                    } else {
+                        (view, self.viewport_size)
+                    };
+
+                    self.queue.write_buffer(&self.uniforms_buffer, 0, Uniforms::new(size).as_bytes());
+
+                    {
+                        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("Texture render pass"),
+                            depth_stencil_attachment: None,
+                            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                                attachment: target,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    store: true,
+                                    load: wgpu::LoadOp::Load,
+                                },
+                            }],
+                        });
+                        render_pass.set_pipeline(&self.render_pipeline);
+                        render_pass.set_bind_group(0, &texture.bind_group, &[]);
+                        render_pass.set_bind_group(1, &self.uniforms_bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                        render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                        render_pass
+                            .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                        render_pass.draw_indexed(0..QUAD_INDICES.len() as u32, 0, command.range.start as u32..command.range.end as u32);
+                    }
+                    self.queue.submit(core::iter::once(encoder.finish()));
                 }
                 DrawCommand::Clear(command) => {
+                    let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Command Encoder"),
+                    });
+
+                    let target = if let Some(target) = command.target {
+                        let texture = self.textures.get(&target.id()).expect("Target not found while presenting.");
+                        &texture.view
+                    } else {
+                        view
+                    };
                     encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("Clear render pass"),
                         depth_stencil_attachment: None,
                         color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                            attachment: view,
+                            attachment: target,
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 store: true,
@@ -129,10 +152,10 @@ impl Backend for BackendWgpu {
                             },
                         }],
                     });
+                    self.queue.submit(core::iter::once(encoder.finish()));
                 }
             }
         }
-        self.queue.submit(core::iter::once(encoder.finish()));
     }
 
     fn load_texture(
@@ -159,12 +182,11 @@ impl Backend for BackendWgpu {
             name: texture.name.as_ref().map(|s| s.as_str()),
             format: texture.format,
             usage: texture.usage,
-            width: texture.width(),
-            height: texture.height(),
+            size: texture.size,
         })
     }
 
-    fn resize_viewport(&mut self, new_size: ViewportSize) {
+    fn resize_viewport(&mut self, new_size: ViewSize) {
         self.viewport_size = new_size;
         self.swap_chain = create_swap_chain(
             &self.device,
@@ -172,22 +194,18 @@ impl Backend for BackendWgpu {
             self.viewport_size.width,
             self.viewport_size.height,
         );
-        self.queue.write_buffer(
-            &self.uniforms_buffer,
-            0,
-            Uniforms::new(new_size).as_bytes(),
-        );
+        self.queue.write_buffer(&self.uniforms_buffer, 0, Uniforms::new(new_size).as_bytes());
     }
 
-    fn viewport(&self) -> ViewportSize {
+    fn viewport(&self) -> ViewSize {
         self.viewport_size
     }
 }
 
 impl BackendWgpu {
     pub async unsafe fn new(
-        window: &impl HasRawWindowHandle,
-        viewport_size: ViewportSize,
+        window: &Window,
+        viewport_size: ViewSize,
     ) -> Result<Self, String> {
         let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
 
@@ -348,6 +366,7 @@ impl BackendWgpu {
             viewport_size,
             index_buffer,
             instance_buffer: None,
+            instance_buffer_capacity: 0,
             next_texture: 0,
             render_pipeline,
             texture_layout,
@@ -365,28 +384,33 @@ impl TextureWgpu {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bind_group_layout: &wgpu::BindGroupLayout,
-        descriptor: TextureLoadOptions,
+        options: TextureLoadOptions,
     ) -> Result<Self, String> {
         let TextureLoadOptions {
             name,
             data,
-            width,
-            height,
             usage,
             format,
-        } = descriptor;
+            size,
+        } = options;
 
         let texture_size = wgpu::Extent3d {
-            width,
-            height,
+            width: size.width,
+            height: size.height,
             depth: 1,
         };
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: name,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+            format: match format {
+                TextureFormat::Bgra8UnormSrgb => wgpu::TextureFormat::Bgra8UnormSrgb,
+                _ => panic!("Texture format not supported.")
+            },
+            usage: match usage {
+                TextureUsage::Default => wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+                TextureUsage::RenderTarget => wgpu::TextureUsage::RENDER_ATTACHMENT | wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+            },
             mip_level_count: 1,
             sample_count: 1,
             size: texture_size,
@@ -398,7 +422,7 @@ impl TextureWgpu {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
@@ -414,8 +438,8 @@ impl TextureWgpu {
                 data,
                 wgpu::TextureDataLayout {
                     offset: 0,
-                    bytes_per_row: 4 * width,
-                    rows_per_image: height,
+                    bytes_per_row: 4 * size.width, // FORMAT!
+                    rows_per_image: size.height,
                 },
                 texture_size,
             );
@@ -443,29 +467,19 @@ impl TextureWgpu {
             _texture: texture,
             format,
             usage,
-            _view: view,
+            view,
             _sampler: sampler,
             bind_group,
-            size: (width, height),
+            size,
         })
-    }
-
-    #[inline(always)]
-    pub fn width(&self) -> u32 {
-        self.size.0
-    }
-
-    #[inline(always)]
-    pub fn height(&self) -> u32 {
-        self.size.1
     }
 }
 
 impl Uniforms {
-    fn new(viewport_size: ViewportSize) -> Self {
+    fn new(size: ViewSize) -> Self {
         let left = 0.0;
-        let right = viewport_size.width as f32;
-        let bottom = viewport_size.height as f32;
+        let right = size.width as f32;
+        let bottom = size.height as f32;
         let top = 0.0;
         let near = 1.0;
         let far = -1.0;

@@ -1,5 +1,5 @@
-#[derive(Copy, Clone, Debug)]
-pub struct ViewportSize {
+#[derive(Copy, Clone, Debug, Default)]
+pub struct ViewSize {
     pub width: u32,
     pub height: u32,
 }
@@ -26,9 +26,21 @@ pub struct Point {
     pub y: f32,
 }
 
+impl Color {
+    pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self { r, g, b, a }
+    }
+}
+
 impl Point {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
+    }
+
+    #[inline(always)]
+    pub fn distance_from(self, rhs: Point) -> f32 {
+        let distance = [rhs.x - self.x, rhs.y - self.y];
+        (distance[0].powi(2) + distance[1].powi(2)).sqrt()
     }
 }
 
@@ -39,16 +51,25 @@ impl Rect {
     }
 
     #[inline(always)]
-    pub(crate) fn normalized(&self, width: f32, height: f32) -> [f32; 4] {
+    pub(crate) fn normalized(self, width: f32, height: f32) -> [f32; 4] {
         let x = self.x as f32 / width;
         let y = self.y as f32 / height;
         let w = self.w as f32 / width;
         let h = self.h as f32 / height;
         [x, y, w, h]
     }
+
+    #[inline(always)]
+    pub fn center(self) -> Point {
+        let x = self.x as f32;
+        let y = self.y as f32;
+        let w = self.w as f32;
+        let h = self.h as f32;
+        Point::new(x + w / 2.0, y + h / 2.0)
+    }
 }
 
-impl ViewportSize {
+impl ViewSize {
     #[inline(always)]
     pub fn new(width: u32, height: u32) -> Self {
         Self { width, height }
@@ -65,5 +86,11 @@ impl Into<[f32; 4]> for Rect {
 impl Into<[f32; 2]> for Point {
     fn into(self) -> [f32; 2] {
         [self.x, self.y]
+    }
+}
+
+impl Into<Rect> for ViewSize {
+    fn into(self) -> Rect {
+        Rect::new(0, 0, self.width, self.height)
     }
 }

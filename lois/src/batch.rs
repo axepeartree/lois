@@ -1,18 +1,10 @@
-use crate::{
-    commons::ViewportSize,
-    graphics::{DrawOptions, DrawTextureBatchCommand},
-    quad::Quad,
-    texture::Texture,
-};
-
-use super::quad::QuadArrayVec;
+use crate::{commons::ViewSize, graphics::{DrawOptions, DrawTextureBatchCommand}, quad::Quad, texture::Texture};
 
 pub struct TextureBatch<'a> {
-    viewport_size: ViewportSize,
-    quads: &'a mut QuadArrayVec,
+    quads: &'a mut Vec<Quad>,
     command: &'a mut DrawTextureBatchCommand,
-    width: u32,
-    height: u32,
+    target_size: ViewSize,
+    texture_size: ViewSize,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -23,36 +15,36 @@ pub struct TextureBatchOptions {
 
 impl<'a> TextureBatch<'a> {
     pub(crate) fn new(
-        viewport_size: ViewportSize,
-        width: u32,
-        height: u32,
-        quads: &'a mut QuadArrayVec,
+        target_size: ViewSize,
+        texture_size: ViewSize,
+        quads: &'a mut Vec<Quad>,
         command: &'a mut DrawTextureBatchCommand,
     ) -> Self {
         Self {
-            viewport_size,
             quads,
             command,
-            width,
-            height,
+            target_size,
+            texture_size,
         }
     }
 
-    pub fn draw(&mut self, options: DrawOptions) {
-        let quad = Quad::try_new_in_viewport(
-            self.viewport_size,
-            (self.width, self.height),
+    pub fn draw(mut self, options: DrawOptions) -> Self {
+        let quad = Quad::new(
+            self.target_size,
+            self.texture_size,
             options.src_rect,
             options.dest_rect,
             options.rotation_center,
             options.rotation_angle,
         );
-        match quad {
-            Some(quad) => {
-                self.quads.push(quad);
-                self.command.range.end += 1;
-            }
-            _ => {}
-        }
+        self.quads.push(quad);
+        self.command.range.end += 1;
+        self
+    }
+}
+
+impl TextureBatchOptions {
+    pub fn new(texture: Texture, target: Option<Texture>) -> Self {
+        Self { texture, target }
     }
 }
